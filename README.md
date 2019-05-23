@@ -1,2 +1,2 @@
 # Public-Scripts
-Software published from our group for public use.
+Code and packages published from the Kobor Lab group for public use.
