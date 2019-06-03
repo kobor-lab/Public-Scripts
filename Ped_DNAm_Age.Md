@@ -1,3 +1,6 @@
+<img src="images/Emoticons/cool.png" alt="hi" class="inline"/>
+<img src="images/Emoticons/cool.png" alt="hi" class="inline"/>
+
 ### Pediatric buccal DNAm clock 
 (currently under review as of June 3,2019)
 #### Notes: this is a DNAm predictor for age from buccal epithelial swabs. It's intended purpose is buccal samples from individuals aged 0-20 years old. Highlighy recommend controlling for esitimated buccal cell proportion when comparing the age acceleration residuals (obtained from regressing predicted age onto chronological age and extracting residuals) with variable of interest. If you have any questions please contact Lisa McEwen (lmcewen@bcchr.ca).
