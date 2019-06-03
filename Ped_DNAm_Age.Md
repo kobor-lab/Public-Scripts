@@ -1,5 +1,3 @@
-<img src="images/Emoticons/cool.png" alt="hi" class="inline"/>
-<img src="images/Emoticons/cool.png" alt="hi" class="inline"/>
 
 ### Pediatric buccal DNAm clock 
 (currently under review as of June 3,2019)
@@ -25,3 +23,7 @@ as.character(datClock[,1][-1])])
 DNAmAgeBuccal=as.numeric(anti.trafo(datClock[1,2]+as.numeric(as.matrix(datMethClock)%*%
 as.numeric(datClock[,2][-1]))))
 ```
+
+ ***
+ 
+<img src="https://github.com/kobor-lab/Public-Scripts/blob/master/ubc-logo.png" width="200" style="float: left; height: 15em; margin-right: 1%; margin-bottom: 0.5em;"> <img src="https://github.com/kobor-lab/Public-Scripts/blob/master/gjvlh3ws.jpg" width="200" style="float: right; height: 15em; margin-left: 1%; margin-bottom: 0.5em;">
