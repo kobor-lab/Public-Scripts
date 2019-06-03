@@ -7,7 +7,7 @@
 
 ### IMPORTANT: You may use this code with acknowledgement that you may not publish any result from this code prior to the publication of the original article which is currently under review. 
 
-Assume a beta data set 'dat0' where the rows of 'dat0' correspond to the CpGs and the first column contains the CpG identifier. The remaining columns correspond to buccal samples.
+Assume a beta data set 'dat0' where the rows of 'dat0' correspond to the CpGs and the first column contains the CpG identifier. The remaining columns correspond to sample identifiers.
 
 ```{r}
 datM=t(dat0[,-1])
