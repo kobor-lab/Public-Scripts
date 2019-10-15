@@ -19,7 +19,7 @@ as.character(datClock[,1][-1]))
 datMethClock0=data.frame(datM[,selectCpGsClock])
 datMethClock= data.frame(datMethClock0[
 as.character(datClock[,1][-1])])
-DNAmAgeBuccal=as.numeric(anti.trafo(datClock[1,2]+as.numeric(as.matrix(datMethClock)%*%
+PedBE_age=as.numeric(anti.trafo(datClock[1,2]+as.numeric(as.matrix(datMethClock)%*%
 as.numeric(datClock[,2][-1]))))
 ```
 
