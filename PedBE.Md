@@ -15,7 +15,7 @@ datM=t(dat0[,-1])
 colnames(datM)=as.character(dat0[,1])
 anti.trafo= function(x,adult.age=20) {
 ifelse(x<0, (1+adult.age)*exp(x)-1, (1+adult.age)*x+adult.age) }
-datClock=read.csv("datcoefInteresting94.csv") #based on ALL samples
+datClock=read.csv("datcoefInteresting94.csv") 
 selectCpGsClock=is.element(dimnames(datM)[[2]],
 as.character(datClock[,1][-1]))
 datMethClock0=data.frame(datM[,selectCpGsClock])
