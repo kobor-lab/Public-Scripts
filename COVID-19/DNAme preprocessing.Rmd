@@ -1,0 +1,299 @@
+---
+title: "DNAme preprocessing"
+output: html_document
+date: "04/29/2020"
+output:
+   rmdformats::readthedown:
+    self_contained: true
+    thumbnails: false
+    lightbox: true
+    gallery: false
+    fig_caption: true
+    highlight: kate
+---
+
+This script outlines the steps utilized in cleaning up a DNA methylation dataset obtained from Illumina Infinium Methylation Arrays.
+
+# Libraries
+```{r Load libraries, results = "hide", warning = F, message = F}
+library(methylumi)
+library(lumi)
+library(lattice)
+library(compare)
+library(gplots)
+library(RColorBrewer)
+library(limma)
+library(ROC)
+library(matrixStats)
+library(reshape)
+library(ggplot2)
+library(ewastools)
+library(sva)
+library(dplyr)
+library(quantro)
+library(readr)
+library(grid)
+library(gridExtra)
+library(ape)
+library(Hmisc)
+library(RCurl)
+library(viridis)
+library(jcolors)
+library(EpiDISH)
+library(wateRmelon)
+library(dendextend)
+library(ggrepel)
+library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+library(IlluminaHumanMethylationEPICmanifest)
+```
+
+# 1 Load DNAme data and meta data 
+```{r load data}
+load("~/KoborLab/kobor_space/rasiimwe/COVID-19/GEO_Datasets/GSE111396/GSE111396_RGset.RData")
+meta_all <- readRDS("~/KoborLab/kobor_space/ckonwar/COPD_Clifford/meta_all.rds")
+
+all(colnames(RGset)%in%rownames(meta_all))
+all(colnames(RGset)==rownames(meta_all)) #mustbeTRUE
+```
+
+# 2 Sample checks 
+
+## 2.0a Control probe check in minfi
+
+NOTE: All samples seems to pass this check 
+```{r control probe check in minfi}
+MSet.raw <- preprocessRaw(RGset)
+qc.raw <- getQC(MSet.raw)
+MSet.raw.QC <- addQC(MSet.raw, qc.raw)
+plotQC(qc.raw)
+```
+
+
+## 2.0b Sex check in minfi
+
+Infering the sex of all samples using minfi’s “getSex” function. getSex() works by comparing median total fluorescent intensity of the X chromosome probes and Y-chromosome probes. minfi separates the points by using a default cutoff of -2 for log2med(Y)−log2med(Y), although cutoff can be preferentially specified (use plotSex to get an idea of appropriate cutoffs). 
+
+NOTE: Reported males and females cluster accordingly. Reported and predicted inferred sex in minfi matches 
+```{r sex, fig.height=18, fig.width=16}
+MSet <- preprocessRaw(RGset)
+gMSet <- mapToGenome(MSet) # convert to a GenomicMethylSet
+predSex <- getSex(gMSet)
+
+# compare to sex from metadata
+meta_all$Sex <- as.factor(meta_all$Sex)
+predSex$predictedSex <- as.factor(predSex$predictedSex)
+
+#by predicted sex
+predictedSex <- as.data.frame(predSex)
+ggplot(predictedSex, aes(x=xMed, y=yMed, fill=predictedSex)) +
+  geom_point(shape = 21, size = 3, alpha=0.8, col="black") +
+  scale_fill_manual(values=c("#bd7b9f", "#2c7dab")) +
+  theme_classic()+
+  theme(axis.text.x=element_text(size=14),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=15, vjust=-0.3),
+        axis.title.y=element_text(size=15, vjust=2),
+        legend.position="none")
+
+# pulling XY probes to check the clustering again
+
+dim(sexProbeIDs <- Locations[which(Locations$chr == "chrY" | Locations$chr == "chrX"), ]) %>% as.data.frame()
+sexBetas <- getBeta(RGset)
+sexBetas <- sexBetas[which(rownames(sexBetas) %in% rownames(sexProbeIDs)),]
+dim(sexBetas)
+
+# color by metadata sex
+sexLabel <- as.vector(meta_all$Sex)
+sexLabel <- gsub("F", "pink", sexLabel)
+sexLabel <- gsub("M", "blue", sexLabel) 
+distSex <- dist(t(sexBetas))
+clustSex <- hclust(distSex)
+plot(as.phylo(clustSex), lab4ut="axial", type = "unrooted", edge.width=0.5, cex=1, tip.color=sexLabel)
+```
+
+
+## 2.0c Detection p-values
+
+Detection p values indicate whether a particular methylation intensity is statistically different from the average intensity over the negative control probes/background. P values which are greater than 0.01 are considered poor quality measurements.
+
+NOTE: No samples have >1% bad detection p value probes
+```{r detection p-value}
+# get detp matrix
+detp <- minfi::detectionP(RGset)
+# detp p > 0.01
+x <- colSums(detp > 0.01)
+rownames(meta_all) <- colnames(RGset)
+all(names(x)==(rownames(meta_all)))
+
+meta_all$detP_01_minfi <- x
+
+# plot
+meta_all %>% 
+  mutate(Sample_Name = factor(as.character(Sample_Name), levels = Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = detP_01_minfi))+
+  geom_point(alpha = 0.7, color = 'black') + 
+  labs(x = 'Samples', y ='',  title = '# of samples with probes with detection p >0.01')+
+  geom_hline(yintercept = 0.01*nrow(detp), linetype ='dashed', color = 'green') +
+  geom_text(aes(x = 0, y = 0.01*nrow(detp)),
+            label = '1%', vjust = -0.5, hjust = -0.5, color = 'green')+
+  scale_y_continuous(limits = c(0, 10000), breaks = seq(0,10000, 1000)) +
+  theme_classic()+
+  theme(axis.text.x = element_blank())
+```
+
+## 2.0d Beadcount
+
+Every probe has multiple beads which serves as replicate readings/multiple measurements per sample. If a given sample has fewer than 3 beads/reads that value is given an NA(missing).
+
+NOTE: No sample has >1% of missing probes
+```{r missing bead}
+# calculates the number of samples with bead count <3 for each probe in matrix of bead count values
+bead <- beadcount(RGset)
+colnames(bead) <- gsub('X', '', colnames(bead))
+
+meta_all <- meta_all %>% mutate(beadcount = colSums(is.na(bead)))
+
+meta_all %>% 
+  mutate(Sample_Name = factor(as.character(Sample_Name), levels = Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = beadcount)) +
+  geom_point(alpha = 0.7, color = 'black') + 
+  geom_hline(yintercept = 0.01*nrow(bead), linetype = 'dashed', color = 'green') +
+  geom_text(aes(x = 0, y = 0.01*nrow(bead)), 
+            label = '1%', vjust = -0.5, hjust = -0.5, color = 'green')+
+  scale_y_continuous(limits = c(0, 12500), breaks = seq(0, 12500, 2500)) +
+  labs(x = 'Samples', y = '', title = '# samples with probes with bead count < 3') +
+  theme_classic() +
+  theme(axis.text.x = element_blank()) 
+```
+
+## 2.0e Average intensity
+
+NOTE: Samples look ok overall only one sample (GSM3030041) at borderline so will keep an eye on that sample if it shows up in other sample checks 
+```{r average intensity}
+green <- getGreen(RGset)
+red <- getRed(RGset)
+greenred <- green + red
+
+# add to sampleInfo
+meta_all <- meta_all %>% mutate(Average_intensity = colMeans(greenred))
+
+meta_all %>% 
+  mutate(Sample_Name = factor(as.character(Sample_Name), levels = Sample_Name)) %>%
+  ggplot(aes(x = Sample_Name, y = Average_intensity)) +
+  geom_point(alpha = 0.7, color = 'black') + theme_classic() +
+  theme(axis.text.x = element_blank()) +
+  geom_hline(yintercept = mean(meta_all$Average_intensity) - 2*sd(meta_all$Average_intensity),
+             linetype = 'dashed', col = 'blue')+
+  geom_hline(yintercept = mean(meta_all$Average_intensity) + 2*sd(meta_all$Average_intensity),
+             linetype = 'dashed', col = 'red') +
+  geom_label_repel(data = meta_all %>% 
+                    filter(Average_intensity < mean(meta_all$Average_intensity) -
+                             2*sd(meta_all$Average_intensity)),
+                  aes(label = Sample_Name), force = 10, nudge_y = -2500, show.legend = F)+
+  scale_y_continuous(limits = c(0, 25000)) +
+  labs(x = 'Samples')
+```
+
+## 2.0f Outlier detection
+
+Outlyx aim to identify outliers based on the function pcout. Based on the robustly sphered data, semi-robust principal components are computed which are needed for obtaining distances for each observation. Separate weights for location and scatter outliers are computed based on these distances. The combined weights are used for outlier identification.
+
+NOTE: GSM3030041 detected as an outlier which also showed up in the intensity check 
+```{r outlier}
+betas <- getBeta(RGset)
+detout <- outlyx(betas)
+detout$Sample_ID <- rownames(detout)
+detout[which(detout$outliers == T),]
+
+#one outlier sample detected
+#GSM3030041_9979858030_R06C02 
+```
+
+## 2.0g Replicate-duplicate check
+
+Using the SNP probes to check if there are any duplicates we only expect to see the replicates clustering together using the SNP probes
+
+NOTE:GSM3030042 and GSM3030043 seem to be replicates and only one sample will be retained for statistical modeling but we will use the correlation between these pair to monitor preprocessing
+```{r replicate, fig.height=18, fig.width=16}
+betas_SNP <- getSnpBeta(RGset)
+dend <- t(betas_SNP ) %>% dist() %>% hclust() %>% as.dendrogram()
+par(mar = c(0, 10, 1, 20))
+dend %>% hang.dendrogram %>%
+plot(xlab = "", sub = "", horiz = TRUE,  main = "")
+```
+
+# 3.0 Correlation between replicates
+
+NOTE: Raw replicates are 0.994 correlated
+```{r correlation raw reps}
+betas <- getBeta(RGset)
+rep.raw <- betas[,grep("GSM3030042|GSM3030043", colnames(betas))]
+rep.raw.cor <- cor(rep.raw,use="pairwise.complete.obs",method = c("spearman"))
+rep.raw.cor#.994
+```
+
+# 4.0 Normalization
+
+Will perform noob to correct for color bias and BMIQ to account for probe-type differences
+
+```{r noob plus BMIQ, eval=F}
+#need to be done once takes a lot of time
+#perform noob first to correct for background noise and dye-bias.
+system.time(
+  noob <- preprocessNoob(RGset)
+)
+
+system.time(
+  bmiqnoob <- BMIQ(noob, nfit=100000)
+) #default for nfit is 5000 which is the number of probes of a given design type to use for the fitting
+```
+
+
+# 5.0 Correlation replicates normalized
+
+NOTE: Normalized replicates are 0.995 correlated
+```{r correlation raw reps}
+norm_betas <- bmiqnoob
+rep.norm <- norm_betas[,grep("GSM3030042|GSM3030043", colnames(norm_betas))]
+rep.norm.cor <- cor(rep.norm,use="pairwise.complete.obs",method = c("spearman"))
+rep.norm.cor#.9954
+```
+
+
+# 6.0 Probe filtering 
+
+XY probes, SNP probes, poorly-performing probes (bad detection p-value probes and missing probes), cross-hybridizing probes (Price et al. annotation) and polymorphic probes were removed. These probes were filtered out from the normalized object  
+
+
+NOTE: PCA was performed at every step to identify the drivers of variation for the PCs from the available meta data and to determine which batch variables are showing up so that they can be corrected for appropriately.
+
+# 7.0 ComBat
+
+NOTE: Correcting for ChipID also corrected for position effects
+```{r Chip ID}
+table(meta_all$Sentrix_ID)
+range(bmiqnoob_filt)
+Mvals <- beta2m(bmiqnoob_filt) #mvalues used for ComBat
+Combat1 <- ComBat(Mvals, meta_all$Sentrix_ID)
+bmiqnoob_filt_corrected <- Combat1
+```
+
+# 8.0 Correlation replicates batch corrected
+
+NOTE: Batch corrected replicates are 0.995 correlated
+```{r correlation raw reps}
+corrected_betas <- m2beta(bmiqnoob_filt_corrected)
+rep.corrected <- corrected_betas[,grep("GSM3030042|GSM3030043", colnames(corrected_betas))]
+rep.corrected.cor <- cor(rep.corrected,use="pairwise.complete.obs",method = c("spearman"))
+rep.corrected.cor#.995
+```
+
+# 9.0 Sanity check on betas
+
+NOTE: Largely looking at the tails of the histogram the betas don't seem to be altered much before and after batch correction
+```{r hist betas}
+betas_clean <- m2beta(bmiqnoob_filt_corrected)
+betas_bmiq <- bmiqnoob_filt
+diff <- betas_clean-betas_bmiq
+hist(diff, cex.axis=0.8,breaks=1000, ylab="", xlim=c(-.10,.10),las=1,main="Difference in beta before and after correction")
+```
